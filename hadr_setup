@@ -1,0 +1,92 @@
+Step by Step Procedure to set up HADR replication between DB2 databases
+
+ON THE PRIMARY:
+                                                                         
+1. Create sample db using the db2sampl command.
+
+  db2sampl
+
+2. Enable it for log archiving.
+
+   db2 update db cfg for <DBNAME> using LOGARCHMETH1 "DISK:D:\archive"
+
+  
+Above command will enable database for log archiving. All the transaction logs will get archived to this location, so make sure you have enough disk space to accommodate the archived transaction logs. This will also place the db in backup pending state.
+
+3. Take an offline backup.
+   db2 "backup database <DBNAME>"
+
+NOTE: An offline backup is NOT mandatory.  
+
+4. Setting up HADR cfg parameters on Primary database.
+
+   db2 update db cfg for <DBNAME> using HADR_LOCAL_HOST <IP ADDRESS OF PRIM>
+   db2 update db cfg for <DBNAME> using HADR_LOCAL_SVC <PORT # on PRIM>
+   db2 update db cfg for <DBNAME> using HADR_REMOTE_HOST <IP ADDRESS OF STNDBY>
+   db2 update db cfg for <DBNAME> using HADR_REMOTE_SVC <PORT # on STNDBY>
+   db2 update db cfg for <DBNAME> using HADR_REMOTE_INST <INSTNAME OF STNDBY>
+   db2 update db cfg for <DBNAME> using LOGINDEXBUILD ON
+
+5. Take an offline backup to be used for setting HADR.
+
+   db2 "backup database <DBNAME>"
+An online backup also can be used. But online backups can take longer to bring the HADR pair in to peer state.  For sake of simplicity, we are using offline backup here.
+
+
+
+ON THE STANDBY MACHINE:
+
+Ensure both the servers are on the same db2level so that a mismatch situation does not occur. Run "db2level" command on both the servers to check whether they are on the same DB2 Version and Fix Pack.
+
+6. FTP the backup image (from the primary machine) to the STANDBY MACHINE
+
+7. db2 "restore database DBNAME"
+
+8. Setting up HADR cfg parameters on standby database.
+
+   db2 update db cfg for <DBNAME> using HADR_LOCAL_HOST <IP ADDRESS ON STANDBY>
+   db2 update db cfg for <DBNAME> using HADR_LOCAL_SVC <PORT # ON STANDBY>
+   db2 update db cfg for <DBNAME> using HADR_REMOTE_HOST <IP ADDRESS ON PRIM>
+   db2 update db cfg for <DBNAME> using HADR_REMOTE_SVC <PORT # ON PRIM>
+   db2 update db cfg for <DBNAME> using HADR_REMOTE_INST <INSTNAME ON PRIM>
+   
+
+9. db2 start hadr on database <DBNAME> as standby
+
+ 
+
+ON THE PRIMARY MACHINE:
+
+10. Starting up HADR on the primary server
+
+   db2 start hadr on database <DBNAME> as primary
+
+   --Verifing HADR is up and running
+   db2pd -db <DBNAME> -hadr
+
+==================================================================
+
+Here's the steps on switching roles (PRIMARY/STANDBY) between the two     
+machine (CM01 and CM11).
+
+1. ON PRIMARY (CM01): db2 connect to <dbname>
+2. ON PRIMARY (CM01): db2 "create table tab1 (col1 int)"
+3. ON PRIMARY (CM01): db2 "insert into tab1 values (1)" -insert 20 rows
+4. ON PRIMARY (CM01): power down the Primary --> db2stop force
+5. ON STANDBY (CM11): db2 takeover hadr on database <dbname> by force
+6. The STANDBY instance on CM11 (DB2) is now the primary
+7. ON CM11: db2pd -db <dbname> -hadr (the ROLE should state: PRIMARY)
+8. ON CM11: db2 connect to <dbname>
+9. ON CM11: db2 "select * from tab1" -You should see the 20 rows inserted
+10. ON CM11: db2 "create table tab2 (col1 int)"
+11. ON CM11 db2 "insert into tab2 values (1)" -insert about 20 rows
+12. ON CM01: db2 start hadr on database <dbname> as standby
+13. ON CM01: db2pd -db <dbname> -hadr (the ROLE should state: STANDBY)
+14. on CM01: db2 takeover hadr on database <dbname>
+15. on CM01: db2pd -db <dbname> -hadr (the ROLE should state: PRIMARY)
+16. ON CM01: db2 "select * from tab2" -you should be able to see the 20 rows inserted
+17. on CM11: db2pd -db <dbname> -hadr (the ROLE should state; STANDBY)   
+
+Note: 
+1. Hostname of the HADR pair cannot be the same on both the servers.
+2. The instance name and the underlying userid on UNIX systems can be different.  Make sure to update the correct name of the instance for the db cfg parameter HADR_REMOTE_INST to the correct value.
